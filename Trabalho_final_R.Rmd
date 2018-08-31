@@ -1,0 +1,283 @@
+---
+title: "Trabalho final"
+date: "06 de julho de 2018"
+output: html_document
+---
+
+## Objetivo do trabalho
+
+##Haver?  duas partes das instru??es a primeira parte junto com a aula de an?lise ##gr?fica.
+##A segunda parte das instru??es ser? disponibilizada no ?ltimo dia deaula.
+
+##A entrega ? composta por:
+##- Conjunto de dados obtidos externamente e utilizados para enriquecimento
+##- Conjunto de scripts utilizados para an?lise
+##- Conjunto de Notebooks explicando as an?lises
+##- Aplica??o Shiny que permite a navega??o nos notebooks
+##- Pacote R para carregamento e distribui??o
+
+
+##O objetivo ? verificar se o grupo:
+##- ? capaz de fazer an?lises estat?sticas utilizando o R
+##- Expor os resultados de suas an?lises
+##- Fazer regress?es simples
+##- Interpreta??o b?sica de uma regress?o
+##- Modelar problemas para aprendizado de m?quina
+##- Criar scripts complexos em R
+
+##Estima-se pelo menos 40 horas de trabalho por grupo
+##- 10 horas por integrante
+
+## R Markdown
+
+##Carregando bibliotecas
+
+```{r}
+library(data.table)
+library(knitr)
+library(ggplot2)
+library(GGally)
+library(ggmap)
+library(maps)
+library(mapdata)
+library(mapview)
+library(leaflet)
+library(dplyr)
+library(taRifx)
+library(geosphere)
+library(plogr)
+library(plotly)
+library(kableExtra)
+library(Rmisc)
+```
+
+## Carregando o Dataset principal
+
+```{r}
+train = read.csv('/Users/User/Desktop/Trabalhos_R/Dataset_trabalho_final/train.csv')
+summary(train)
+```
+
+```{r}
+train <- mutate(train, pickup_datetime = ymd_hms(pickup_datetime),
+         dropoff_datetime = ymd_hms(dropoff_datetime))
+```
+
+## Utilizamos a fun??o Haversine para fazer a convers?o de latitude e longitude, do ponto de inicio da corrida (Pickup) e do ponto de termino da corrida (Dropoff), em dist?ncia (KM).
+
+```{r}
+Pickup_location = data.frame(train$pickup_longitude, train$pickup_latitude)
+Dropoff_location = data.frame(train$dropoff_longitude, train$dropoff_latitude)
+Haversine_distance <- distHaversine(Pickup_location, Dropoff_location, r=6378137)
+Haversine_distance
+```
+
+## Variaveis do Dataset
+
+```{r}
+names(train)
+```
+
+## Usando amostra aleat?ria devido ao conjuto de dados ser grande.
+
+```{r}
+train$vendor_id <-as.factor(train$vendor_id)
+train$passenger_count <-as.factor(train$passenger_count)
+train$trip_duration <-as.numeric(train$trip_duration)
+train$store_and_fwd_flag <-as.factor(train$store_and_fwd_flag)
+set.seed(123)
+trainsample <- sample_n(train, 10000)
+```
+
+
+## Abaixo seguem gr?ficos entre as vari?veis categ?ricas e o trip duration usando a fun??o ggpairs do pacote RGGally.
+
+```{r}
+ggpairs(trainsample[,c("vendor_id", "passenger_count", "store_and_fwd_flag","trip_duration")], upper = list(continuous = "points", combo = "box"), lower = list(continuous = "points", combo = "box"))
+```
+
+## Manipula??o de dados
+Alterando o formato das colunas de data e hora 
+
+```{r}
+train <- mutate(train, pickup_datetime = ymd_hms(pickup_datetime),
+         dropoff_datetime = ymd_hms(dropoff_datetime))
+```
+
+## Corridas ao longo do Ano
+Distribui??o das corridas ao longo do ano (Janeiro a Junho). Cada barra do histograma ? referente a um dia da semana.
+
+```{r}
+PickupDate <- train %>%
+  ggplot(aes(pickup_datetime)) +
+  geom_histogram(fill = "blue", bins = 182) +
+  labs(x = "Dias do ano - Inicio das Corridas", y = "Qtd Corridas")
+
+DropoffDate <- train %>%
+  ggplot(aes(dropoff_datetime)) +
+  geom_histogram(fill = "red", bins = 182) +
+  labs(x = "Dias do ano - Fim das Corridas", y = "Qtd Corridas")
+
+layout <- matrix(c(1,2),2,1,byrow=FALSE)
+multiplot(PickupDate, DropoffDate, layout=layout)
+```
+
+Podemos verificar que h? uma varia??o de n?mero de corridas dependendo do dia da semana. Outro fator que chama aten??o ? que no fim de janeiro houve um n?mero muito baixo de corridas. 
+Agora vamos analisar apenas o m?s de Janeiro:
+
+```{r}
+Pickup_Jan <- filter(train,pickup_datetime> "2016-01-01" & pickup_datetime < "2016-01-31") %>% 
+  ggplot(aes(pickup_datetime)) +
+  geom_histogram(fill = "blue", bins = 31) +
+  labs(x = "Janeiro - Inicio das Corridas", y = "Qtd Corridas")
+
+Dropoff_Jan <- filter(train,dropoff_datetime> "2016-01-01" & dropoff_datetime < "2016-01-31")%>%   
+  ggplot(aes(dropoff_datetime)) +
+  geom_histogram(fill = "red", bins = 31) +
+  labs(x = "Janeiro - Fim das Corridas", y = "Qtd Corridas")
+
+layout <- matrix(c(1,2),2,1,byrow=FALSE)
+multiplot(Pickup_Jan, Dropoff_Jan, layout=layout)
+
+filter(train,pickup_datetime == "2016-01-24")
+
+```
+
+De fato, conforme verificado anteriormente, no dia 24 de Janeiro de 2016 n??o foi documentado nenhuma corrida. N?o podemos saber o motivo, poderia ser algum problema do sistema.
+Outro fator not??rio ?? que o n??mero de corridas, tende a crescer de segunda para domingo.
+
+## Boxplot (Passageiros X rela??o a trip_duration)
+
+Abaixo segue a an?lise de um gr?fico boxplot (Passageiros X rela??o a trip_duration) 
+Os t?xis oficiais de NY s?o autorizados transportar at? 5 passageiros, existem empresas de Limusine que lavem at? 10 passageiros por corrida, portanto, por n?o saber o nome dos fornecedores dos taxis, a vari?vel n?mero de passageiros n?o foi alterada.
+No gr?fico 1 (fornecedor de t?xi 1), aparentemente existe correla??o entre a contagem de passageiros e dura??o da viagem.
+Tamb?m existe pouca correla??o entre o vendor_id e a dura??o da viagem, embora o ID do fornecedor 2 seja respons?vel pelos outliers.
+
+```{r}
+g <- ggplot(train,aes(as.factor(passenger_count), trip_duration, color = passenger_count))
+g +  geom_boxplot() +
+    scale_y_log10() +
+    theme(legend.position = "none") +
+    facet_wrap(~ vendor_id) +
+    labs(title = "Dura??o da corrida pelo n?mero de passageiros", x = "N?mero de passageiros",y= "Trip duration (s)")
+```
+
+## Visualiza??o de corridas no mapa de NY
+Selecionamos uma parte do dataset para simples verifica????o no mapa de onde partem (preto) e chegam (amarelo) as corridas.
+
+```{r}
+set.seed(10)
+Sample_data <- sample_n(train, 10e3)
+leaflet(data = Sample_data) %>% addProviderTiles("Esri.NatGeoWorldMap") %>%
+  addCircleMarkers(~ pickup_longitude, ~pickup_latitude, radius = 1,
+                   color = "black", fillOpacity = 0.5) %>% 
+  addCircleMarkers(~ dropoff_longitude, ~dropoff_latitude, radius = .01,
+                   color = "yellow", fillOpacity = 0.5)
+```
+
+Nota-se que a grande maioria das corridas de taxi se iniciam na ilha de manhattan, concentrada na parte mais abaixo da ilha. Outro ponto de destaque ?? o aeroporto JFK, principal aeroporto para chegar e sair de NY.
+Outro fator que chama aten????o ?? que h?? v??rias corridas se iniciam em lugares e cidades bem distantes da ilha.
+
+Ao analisar os pontos de chegada, percebe-se que o encerramento das corridas se concentrarm tamb??m na ilha (com mais corridas encerradas ao norte da ilha) e no aeroporto JFK. Um ponto que chama aten????o ?? a oeste da ilha nota-se, levemente, que tem mais finaliza????es de corrida do que in??cio.
+
+## Dura??oo das corridas
+Plotando a dura??o de corridas utilizando histograma
+
+```{r}
+train %>%
+  ggplot(aes(trip_duration)) +
+  geom_histogram(fill = "red", bins = 250) +
+  scale_x_log10() +
+  scale_y_sqrt()
+
+summary(train$trip_duration)
+```
+
+Claramente h?? uma distribui??o normal para dura??o de corridas, sendo que a m??dia est?? pr??ximo de 1000s (pouco mais de 16 minutos). 
+Ao olhar o Summary dessa coluna, podemos comprovar essa informa????o. A m??dia ?? 959s. 
+
+## Sele??oo do Subset do dataset
+O subset considerado apresenta todos os taxis que durante sua corrida perderam conex??o com a internet.
+
+```{r}
+subset_train <- filter(train, store_and_fwd_flag == "Y" )
+summary(subset_train)
+boxplot(subset_train)
+```
+
+Selecionando apenas as colunas consideradas mais relevantes para as an??lises
+```{r}
+drop.cols <- c('id', 'vendor_id', 'passenger_count', 'store_and_fwd_flag')
+subset_train2 <- select(subset_train, -drop.cols) 
+plot(subset_train2)
+```
+
+## Visualiza??oo do subset corridas no Mapa
+Visualizando os pontos de sa??da e chegada das corridas para o Subset escolhido (corridas que os taxis perderam conex??o com a internet)
+
+```{r}
+leaflet(data = subset_train) %>% addProviderTiles("Esri.NatGeoWorldMap") %>%
+  addCircleMarkers(~ pickup_longitude, ~pickup_latitude, radius = 1,
+                   color = "black", fillOpacity = 0.5) %>% 
+  addCircleMarkers(~ dropoff_longitude, ~dropoff_latitude, radius = .01,
+                   color = "yellow", fillOpacity = 0.5)
+```
+
+O comportamento das corridas para esse subset tendem a ser semelhante ao Sample que extraimos do dataset. 
+
+## Montando uma configura??o inicial do mapa
+
+```{r}
+cfg <- list( x.min = -30, x.max = -18, x.step = 0.2,
+             y.min =  30, y.max =  42, y.step = 0.2)
+
+#Sequencias e quantidades de X e Y
+cfg$x.lim <- seq( from = cfg$x.min, to = cfg$x.max, by = cfg$x.step)
+cfg$y.lim <- seq( from = cfg$y.min, to = cfg$y.max, by = cfg$y.step)
+cfg$x.qtde <- length(cfg$x.lim) -1
+cfg$y.qtde <- length(cfg$y.lim) -1
+cfg$all.qtde <- cfg$x.qtde * cfg$y.qtde
+cfg$x <- paste0('X', seq_len(cfg$x.qtde ) )
+cfg$y <- paste0('Y', seq_len(cfg$y.qtde ) )
+
+#Sequencias de todos os quadrantes
+cfg$all <- paste0('q', seq_len(cfg$all.qtde ) )
+names(cfg$all) <- cfg$all
+```
+
+## Montando o mapa, para facilitar vizualiza??o
+
+```{r}
+mapa = matrix( data=cfg$all, nrow = cfg$y.qtde)
+colnames(mapa) <- cfg$x
+row.names(mapa) <- cfg$y
+mapa[20:1, 1:10]
+```
+
+## Criando atributos do mapa
+
+```{r}
+mapa.att <- data.frame(names=cfg$all, row.names = cfg$all)
+mapa.att <- mutate( mapa.att,
+                    x = rep(cfg$x, each=60),
+                    y = rep(cfg$y, 60),
+                    x.from = rep( cfg$x.lim[1:60], each=60),
+                    x.to = rep( cfg$x.lim[2:61], each=60),
+                    y.from = rep( cfg$x.lim[1:60], 60),
+                    y.to = rep( cfg$x.lim[2:61], 60) )
+
+head(mapa.att, 31)
+```
+
+## Display simples de mapa de calor:
+
+```{r}
+cores.mapa  = c("white", "#63be7b", "#ffeb84",  "#f8696b")
+gradiente.mapa = colorRampPalette(cores.mapa)(n = 30)
+ plot_ly(x = cfg$x,
+         y = cfg$y,
+         z = matrix(runif(60*60), ncol=60, nrow = 60),
+         colors = gradiente.mapa,
+         type = "heatmap")
+```
+
